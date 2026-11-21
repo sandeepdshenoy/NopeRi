@@ -236,21 +236,34 @@ class ConfigManager:
     # ── AI provider helpers ───────────────────────────────────────────────────
 
     def get_ai_url(self) -> str:
-        if self.config["ai"].get("provider") == "openrouter":
+        provider = self.config["ai"].get("provider")
+        if provider == "openrouter":
             return "https://openrouter.ai/api/v1/chat/completions"
+        if provider == "anthropic":
+            return "https://api.anthropic.com/v1/messages"
         return "https://api.openai.com/v1/chat/completions"
 
     def get_ai_key(self) -> str:
-        if self.config["ai"].get("provider") == "openrouter":
+        provider = self.config["ai"].get("provider")
+        if provider == "openrouter":
             return os.getenv("OPENROUTER_API_KEY", "")
+        if provider == "anthropic":
+            return os.getenv("ANTHROPIC_API_KEY", "")
         return os.getenv("OPEN_API_KEY", "")
 
     def get_ai_headers(self) -> dict:
+        provider = self.config["ai"].get("provider")
+        if provider == "anthropic":
+            return {
+                "x-api-key":         self.get_ai_key(),
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            }
         headers = {
             "Authorization": f"Bearer {self.get_ai_key()}",
             "Content-Type":  "application/json",
         }
-        if self.config["ai"].get("provider") == "openrouter":
+        if provider == "openrouter":
             headers["HTTP-Referer"] = "https://github.com/Traverser25/NopeRi"
             headers["X-Title"]      = "NopeRi"
         return headers

@@ -459,15 +459,27 @@ Jobs:
 """
 
         # ── API call ─────────────────────────────────────────────────────────
+        provider = self.cfg.config["ai"].get("provider", "openai")
+        model    = self.cfg.config["ai"]["model"]
+
+        if provider == "anthropic":
+            payload = {
+                "model":      model,
+                "max_tokens": 1024,
+                "messages":   [{"role": "user", "content": prompt}],
+            }
+        else:
+            payload = {
+                "model":       model,
+                "messages":    [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+            }
+
         try:
             res = requests.post(
                 self.cfg.get_ai_url(),
                 headers=self.cfg.get_ai_headers(),
-                json={
-                    "model":       self.cfg.config["ai"]["model"],
-                    "messages":    [{"role": "user", "content": prompt}],
-                    "temperature": 0.2,
-                },
+                json=payload,
                 timeout=90,
             )
 
@@ -475,7 +487,10 @@ Jobs:
                 print("AI HTTP ERROR:", res.status_code, res.text[:200])
                 return {}
 
-            content = res.json()["choices"][0]["message"]["content"]
+            if provider == "anthropic":
+                content = res.json()["content"][0]["text"]
+            else:
+                content = res.json()["choices"][0]["message"]["content"]
             content = re.sub(r"```json|```", "", content).strip()
             match   = re.search(r"\{.*\}", content, re.S)
             if not match:
