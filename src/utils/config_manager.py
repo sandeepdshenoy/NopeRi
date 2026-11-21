@@ -31,7 +31,7 @@ DEFAULT_CONFIG: dict = {
         "current_ctc":       "5",
         "expected_ctc":      "7",
         "notice_days":       30,
-        "resume_path":       "",   # absolute path to PDF; used by cron profile updater
+        "resume_path":       "",   # absolute path to PDF; set via --setup wizard
     },
     "ai": {
         "provider":          "openai",   # "openai" | "openrouter"
@@ -97,6 +97,16 @@ DEFAULT_VETO: dict = {
         "accenture", "wipro", "infosys", "tcs", "cognizant",
         "capgemini", "hcl", "tech mahindra", "mphasis", "hexaware",
         "ltimindtree", "persistent", "birlasoft",
+    ],
+    # Stack veto: skip jobs whose mandatory tags are dominated by these stacks
+    # with no overlap with the candidate's preferred stack.
+    # Edit via: python apply_agent.py --veto add-stack "java"
+    "stack_veto": [
+        "java", "spring", "spring boot", "hibernate",
+        ".net", "c#", "asp.net", "dotnet",
+        "php", "laravel", "symfony", "codeigniter",
+        "ruby", "rails", "ruby on rails",
+        "scala", "kotlin", "groovy",
     ],
 }
 

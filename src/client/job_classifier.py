@@ -83,6 +83,7 @@ class JobFilterPipeline2:
         veto = self.cfg.veto
         self.VETO_TITLES    = [t.lower() for t in veto.get("titles",    [])]
         self.VETO_COMPANIES = {c.lower() for c in veto.get("companies", [])}
+        self.VETO_STACKS    = {s.lower() for s in veto.get("stack_veto", [])}
 
         # Candidate's stack from config (drives tag_presort overlap score)
         raw_stack = self.cfg.config.get("profile", {}).get("tech_stack", [])
@@ -118,6 +119,7 @@ class JobFilterPipeline2:
         n = len(jobs); jobs = self.desc_red_flag_check(jobs); d_flags   = n - len(jobs)
         n = len(jobs); jobs = self.title_filter(jobs);        d_title   = n - len(jobs)
         n = len(jobs); jobs = self.company_veto(jobs);        d_company = n - len(jobs)
+        n = len(jobs); jobs = self.stack_veto_filter(jobs);   d_stack   = n - len(jobs)
 
         jobs = self.tag_presort(jobs)
         jobs = jobs[:self.ai_score_limit]
@@ -129,6 +131,7 @@ class JobFilterPipeline2:
             (d_flags,   "flags"),
             (d_title,   "title"),
             (d_company, "company"),
+            (d_stack,   "stack"),
         ]
         breakdown = "  ".join(f"-{d} {lbl}" for d, lbl in dropped if d > 0) or "none filtered"
         print(f"  {raw} fetched  →  {len(jobs)} to score   ({breakdown})")
@@ -290,6 +293,52 @@ class JobFilterPipeline2:
             if any(vc in company for vc in self.VETO_COMPANIES):
                 continue
             clean.append(j)
+        return clean
+
+    # =========================================================
+    # STACK VETO — tag-based, veto.json-driven
+    #
+    # Skips jobs where the mandatory tags (first 2 skills Naukri marks as
+    # required) are entirely from vetoed stacks (Java, .NET, PHP, etc.)
+    # with no overlap with the candidate's preferred stack.
+    #
+    # A partial hit (e.g. "java" + "node.js") is NOT vetoed — only jobs
+    # where every mandatory tag is from the veto list.
+    # =========================================================
+
+    def stack_veto_filter(self, jobs):
+        if not self.VETO_STACKS:
+            return jobs
+
+        my_stack = set(self.MY_STACK)
+        clean    = []
+
+        for j in jobs:
+            mandatory = j.get("mandatory_tags") or []
+            all_tags  = j.get("tags") or []
+
+            # If mandatory tags are empty, fall back to first 2 of all tags
+            check_tags = mandatory if mandatory else all_tags[:2]
+
+            if not check_tags:
+                clean.append(j)
+                continue
+
+            veto_hits = [t for t in check_tags if any(v in t for v in self.VETO_STACKS)]
+
+            # Only terms in MY_STACK that are NOT themselves vetoed can override.
+            # Prevents contradiction when a term (e.g. "javascript") appears in
+            # both the veto list and the candidate's tech_stack.
+            non_vetoed_stack = {s for s in my_stack if not any(v in s for v in self.VETO_STACKS)}
+            my_stack_hits    = [t for t in check_tags if any(s in t for s in non_vetoed_stack)]
+
+            # Veto only when every mandatory tag is from a vetoed stack
+            # AND none of the candidate's non-vetoed preferred stack is present
+            if len(veto_hits) == len(check_tags) and not my_stack_hits:
+                continue
+
+            clean.append(j)
+
         return clean
 
     # =========================================================

@@ -124,7 +124,9 @@ def _parse_args() -> argparse.Namespace:
             "  --veto add-company Infosys\n"
             "  --veto remove-company Infosys\n"
             "  --veto add-title walk-in\n"
-            "  --veto remove-title walk-in"
+            "  --veto remove-title walk-in\n"
+            "  --veto add-stack java\n"
+            "  --veto remove-stack java"
         ),
     )
     p.add_argument("--setup",        action="store_true", help="Re-run the setup wizard")
@@ -150,6 +152,9 @@ def _handle_veto(args_list: list, cfg: ConfigManager) -> None:
         print(f"\n{Fore.CYAN}── Title vetoes {'─'*42}{Style.RESET_ALL}")
         for t in sorted(veto.get("titles", [])):
             print(f"  {Fore.WHITE}{t}{Style.RESET_ALL}")
+        print(f"\n{Fore.CYAN}── Stack vetoes {'─'*42}{Style.RESET_ALL}")
+        for s in sorted(veto.get("stack_veto", [])):
+            print(f"  {Fore.WHITE}{s}{Style.RESET_ALL}")
         return
 
     if len(args_list) < 2:
@@ -186,6 +191,22 @@ def _handle_veto(args_list: list, cfg: ConfigManager) -> None:
         before = len(veto.get("titles", []))
         veto["titles"] = [x for x in veto.get("titles", []) if x.lower() != value]
         if len(veto["titles"]) < before:
+            cfg.save_veto(veto); print(f"{Fore.GREEN}  ✓ Removed: {value}{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.YELLOW}  Not found: {value}{Style.RESET_ALL}")
+
+    elif action == "add-stack":
+        lst = veto.setdefault("stack_veto", [])
+        if value not in [x.lower() for x in lst]:
+            lst.append(value); cfg.save_veto(veto)
+            print(f"{Fore.GREEN}  ✓ Added stack veto: {value}{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.YELLOW}  Already in list: {value}{Style.RESET_ALL}")
+
+    elif action == "remove-stack":
+        before = len(veto.get("stack_veto", []))
+        veto["stack_veto"] = [x for x in veto.get("stack_veto", []) if x.lower() != value]
+        if len(veto["stack_veto"]) < before:
             cfg.save_veto(veto); print(f"{Fore.GREEN}  ✓ Removed: {value}{Style.RESET_ALL}")
         else:
             print(f"{Fore.YELLOW}  Not found: {value}{Style.RESET_ALL}")
@@ -360,7 +381,7 @@ def _fetch_jobs(jc: NaukriJobClient, config: dict) -> list:
     for q in queries:
         for page in range(1, pages + 1):
             try:
-                jobs     = jc.search_jobs(q["keyword"], q.get("location",""), exp, job_age, page)
+                jobs     = jc.search_jobs(q["keyword"], q.get("location",""), page=page, job_age=job_age, experience=exp)
                 new_jobs = [j for j in jobs if j.job_id not in seen and not seen.add(j.job_id)]
                 all_jobs.extend(new_jobs)
                 _print_fetch_row(q["keyword"], q.get("location",""), exp, page, len(jobs), len(new_jobs))
@@ -416,6 +437,19 @@ def run_agent(cfg: ConfigManager, db: AppliedJobsDB) -> dict:
 
     if tg_on and alerts.get("on_scheduler_start", True):
         alert_run_started("manual")
+
+    # ── Resume upload ──────────────────────────────────────────────────────────
+    resume_path = config.get("profile", {}).get("resume_path", "").strip()
+    if resume_path:
+        _section("uploading resume")
+        if os.path.exists(resume_path):
+            try:
+                client.update_resume(resume_path)
+                print(f"  {Fore.GREEN}Resume uploaded: {Fore.WHITE}{resume_path}{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"  {Fore.YELLOW}Resume upload failed (continuing): {e}{Style.RESET_ALL}")
+        else:
+            print(f"  {Fore.YELLOW}Resume path not found, skipping: {resume_path}{Style.RESET_ALL}")
 
     # ── Fetch ─────────────────────────────────────────────────────────────────
     jc   = NaukriJobClient(client, config=config)

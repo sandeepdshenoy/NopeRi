@@ -609,6 +609,11 @@ input[type=range] { flex: 1; accent-color: var(--accent); height: 4px }
         <div class="hint">Press Enter or comma after each technology.</div>
       </div>
       <div class="field">
+        <div class="label">Ecosystem Filter</div>
+        <div class="hint" style="margin-bottom:8px">Select the ecosystems you want to work in. Jobs whose required skills belong <em>only</em> to unselected ecosystems are skipped automatically.</div>
+        <div id="eco-group" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px"></div>
+      </div>
+      <div class="field">
         <div class="label">Preferred Locations</div>
         <input type="text" id="locations" placeholder="Bangalore, Hyderabad, Mumbai">
         <div class="hint">Comma-separated. Leave blank for All India.</div>
@@ -1099,6 +1104,40 @@ document.getElementById('stack-inp').addEventListener('keydown', e => {
 });
 renderTags();
 
+// ── Ecosystem filter ──────────────────────────────────────────────────────────
+const ECO_STACKS = {
+  'Python':                ['python','django','flask','fastapi'],
+  'JavaScript/TypeScript': ['javascript','typescript','node.js','nodejs','express','nestjs'],
+  'Go':                    ['golang','go'],
+  'Rust':                  ['rust'],
+  'Kotlin':                ['kotlin','ktor'],
+  'PHP':                   ['php','laravel','symfony','codeigniter'],
+  'Ruby':                  ['ruby','rails','ruby on rails'],
+  'Java':                  ['java','spring','spring boot','hibernate'],
+  '.NET / C#':             ['.net','c#','asp.net','dotnet'],
+  'Scala':                 ['scala'],
+};
+// Default: all selected (no filtering). Deselect to veto that ecosystem.
+const ecoSet = new Set(Object.keys(ECO_STACKS));
+
+function renderEco() {
+  const g = document.getElementById('eco-group');
+  g.innerHTML = '';
+  Object.keys(ECO_STACKS).forEach(name => {
+    const sel = ecoSet.has(name);
+    const lbl = document.createElement('label');
+    lbl.className = 'radio-opt' + (sel ? ' sel' : '');
+    lbl.style.cursor = 'pointer';
+    lbl.innerHTML = `<input type="checkbox" ${sel ? 'checked' : ''} style="accent-color:var(--accent);flex-shrink:0"><span>${name}</span>`;
+    lbl.querySelector('input').addEventListener('change', e => {
+      if (e.target.checked) ecoSet.add(name); else ecoSet.delete(name);
+      lbl.classList.toggle('sel', e.target.checked);
+    });
+    g.appendChild(lbl);
+  });
+}
+renderEco();
+
 document.getElementById('s2-back').addEventListener('click', () => goTo(1));
 document.getElementById('s2-next').addEventListener('click', () => goTo(3));
 
@@ -1192,6 +1231,8 @@ function buildSummary() {
     ['Role',       role.charAt(0).toUpperCase() + role.slice(1)],
     ['Experience', exp + ' year(s)'],
     ['Tech stack', stack.length > 46 ? stack.slice(0,44)+'…' : stack],
+    ['Ecosystems', ecoSet.size === Object.keys(ECO_STACKS).length ? 'All' : [...ecoSet].join(', ') || 'None selected'],
+    ['Vetoed ecosystems', Object.keys(ECO_STACKS).filter(k => !ecoSet.has(k)).join(', ') || 'None'],
     ['Locations',  locs],
     ['Remote',     remote],
     ['AI',         provider + ' / ' + model],
@@ -1273,6 +1314,11 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     queries,
     session: storedSession,
     env_vars,
+    veto: {
+      stack_veto: Object.entries(ECO_STACKS)
+        .filter(([name]) => !ecoSet.has(name))
+        .flatMap(([, stacks]) => stacks),
+    },
   };
 
   try {
@@ -1337,6 +1383,15 @@ fetch(API + '/api/config')
     }
     if (p.tech_stack && p.tech_stack.length) {
       tagSet.clear(); p.tech_stack.forEach(t => tagSet.add(t)); renderTags();
+    }
+
+    // Pre-fill ecosystems from veto.json stack_veto
+    const sv = new Set((cfg.veto || {}).stack_veto || []);
+    if (sv.size) {
+      Object.entries(ECO_STACKS).forEach(([name, stacks]) => {
+        if (stacks.some(s => sv.has(s))) ecoSet.delete(name); else ecoSet.add(name);
+      });
+      renderEco();
     }
 
     // Pre-fill AI
@@ -1445,6 +1500,11 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             data = {}
 
+        try:
+            data['veto'] = cfg.load_veto()
+        except Exception:
+            pass
+
         has_or  = bool(os.getenv('OPENROUTER_API_KEY'))
         has_oai = bool(os.getenv('OPEN_API_KEY'))
         data['_env'] = {
@@ -1487,12 +1547,17 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _save(self, body: dict):
         from src.utils.config_manager import ConfigManager, _deep_merge, PROMPT_PATH
-        env_vars = body.pop('env_vars', {})
+        env_vars  = body.pop('env_vars', {})
+        veto_data = body.pop('veto', None)
         self._write_env(env_vars)
         cfg = ConfigManager()
         try:
             merged = _deep_merge(cfg.load(), body)
             cfg.save(merged)
+            if veto_data is not None:
+                existing_veto = cfg.load_veto()
+                existing_veto['stack_veto'] = veto_data.get('stack_veto', [])
+                cfg.save_veto(existing_veto)
             if not PROMPT_PATH.exists():
                 PROMPT_PATH.write_text(cfg.generate_prompt_from_config(merged), encoding='utf-8')
             self._json({'ok': True})
