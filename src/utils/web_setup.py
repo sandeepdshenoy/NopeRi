@@ -626,6 +626,11 @@ input[type=range] { flex: 1; accent-color: var(--accent); height: 4px }
         <div class="field"><div class="label">Current CTC (LPA)</div><input type="text" id="current-ctc" value="5"></div>
         <div class="field"><div class="label">Expected CTC (LPA)</div><input type="text" id="expected-ctc" value="7"></div>
       </div>
+      <div class="field">
+        <div class="label">Resume Path (PDF)</div>
+        <input type="text" id="resume-path" placeholder="C:/Users/You/resume.pdf">
+        <div class="hint">Absolute path to your PDF resume. Uploaded automatically on each run.</div>
+      </div>
     </div>
     <div class="card-foot">
       <button class="btn btn-ghost" id="s2-back">&larr; Back</button>
@@ -1295,6 +1300,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
       current_ctc:      document.getElementById('current-ctc').value.trim()||'5',
       expected_ctc:     document.getElementById('expected-ctc').value.trim()||'7',
       notice_days:      parseInt(document.getElementById('notice-days').value)||30,
+      resume_path:      document.getElementById('resume-path').value.trim(),
     },
     ai: {
       provider,
@@ -1377,6 +1383,7 @@ fetch(API + '/api/config')
     if (p.apply_remote !== undefined) document.getElementById('apply-remote').checked = p.apply_remote;
     if (p.locations && p.locations.length)
       document.getElementById('locations').value = p.locations.join(', ');
+    if (p.resume_path) document.getElementById('resume-path').value = p.resume_path;
     if (p.role_focus) {
       const r = document.querySelector('input[name="role"][value="'+p.role_focus+'"]');
       if (r) { r.checked = true; r.closest('.radio-opt').classList.add('sel'); }
