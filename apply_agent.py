@@ -599,12 +599,13 @@ if __name__ == "__main__":
     if args.setup or not CONFIG_PATH.exists():
         from src.utils.web_setup import launch as web_launch
         web_launch()
-        cfg._config = None  # reload after wizard wrote config.json
+        cfg.reload()  # reload after wizard wrote config.json
         if args.setup:
             sys.exit(0)
 
-    # one-time CSV → SQLite migration (silent if no CSV)
-    if os.path.exists("applied_jobs.csv"):
+    # one-time CSV → SQLite migration (silent if no CSV or already migrated)
+    _MIGRATION_FLAG = ".csv_migrated"
+    if os.path.exists("applied_jobs.csv") and not os.path.exists(_MIGRATION_FLAG):
         count = 0
         try:
             with open("applied_jobs.csv", newline="", encoding="utf-8") as f:
@@ -619,5 +620,11 @@ if __name__ == "__main__":
             pass
         if count:
             print(f"  {Fore.CYAN}Migrated {count} record(s) from CSV → SQLite{Style.RESET_ALL}")
+        # Write flag so this block is skipped on all future runs.
+        try:
+            with open(_MIGRATION_FLAG, "w"):
+                pass
+        except Exception:
+            pass
 
     run_agent(cfg, db)

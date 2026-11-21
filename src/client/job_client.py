@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.models.models import Job
 from src.client.naukri_client import NaukriLoginClient
@@ -145,7 +145,7 @@ class NaukriJobClient:
 
     def _cluster_dates(self) -> dict:
         # Returns a dict of current UTC timestamps used by the recommended jobs payload.
-        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         return {
             "apply":        now,
             "preference":   now,
@@ -158,7 +158,8 @@ class NaukriJobClient:
 
     def _build_seo_key(self, keyword: str, location: str, page: int) -> str:
         # Produces the seoKey param expected by the search endpoint.
-        # Example: "python-developer-jobs-in-bangalore-2"
+        # Example (city):  "python-developer-jobs-in-bangalore-2"
+        # Example (WFH):   "work-from-home-python-developer-jobs-2"
         kw_slug = (
             keyword.strip().lower()
             .replace(".", "-dot-")
@@ -167,8 +168,13 @@ class NaukriJobClient:
             .strip("-")
         )
 
-        if location.strip():
-            loc_slug = location.strip().lower().replace(" ", "-")
+        loc = location.strip().lower()
+
+        if loc in ("work from home", "work-from-home", "wfh", "remote"):
+            return f"work-from-home-{kw_slug}-jobs-{page}"
+
+        if loc:
+            loc_slug = loc.replace(" ", "-")
             return f"{kw_slug}-jobs-in-{loc_slug}-{page}"
 
         return f"{kw_slug}-jobs-{page}"
@@ -234,7 +240,7 @@ class NaukriJobClient:
             raise ValueError("job_id is required")
 
         if not sid:
-            sid = datetime.utcnow().strftime("%Y%m%d%H%M%S") + "0000000"
+            sid = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "0000000"
 
         url = f"https://www.naukri.com/jobapi/v4/job/{job_id}"
 
@@ -314,7 +320,7 @@ class NaukriJobClient:
             raise ValueError("Invalid job_id")
 
         if not sid:
-            sid = datetime.utcnow().strftime("%Y%m%d%H%M%S") + "0000000"
+            sid = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "0000000"
 
         apply_src, logstr_template = APPLY_SRC_MAP.get(source, APPLY_SRC_MAP["recommended"])
         logstr = logstr_template.format(sid=sid)
@@ -556,6 +562,9 @@ class NaukriJobClient:
             "latLong":        lat_long,
         }
 
+        if location.strip():
+            params["location"] = location.strip()
+
         if notice_period is not None:
             params["noticePeriod"] = notice_period
 
@@ -573,9 +582,6 @@ class NaukriJobClient:
 
         data     = res.json()
         raw_jobs = data.get("jobDetails") or data.get("jobs") or []
-
-        # format_jobs is called here for side-effect logging/debugging purposes.
-        self.format_jobs(raw_jobs)
 
         if not raw_jobs:
             logger.debug("No jobs returned for keyword=%r page=%d", keyword, page)

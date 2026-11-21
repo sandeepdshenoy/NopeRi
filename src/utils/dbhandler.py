@@ -1,8 +1,7 @@
-import csv
 import hashlib
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # =============================================================================
@@ -84,24 +83,14 @@ class NkparamDB:
 # records (stored with empty company) are matched correctly.
 # =============================================================================
 
-_CSV_FIELDS = ["hash", "job_id", "title", "company", "location", "ai_score", "applied_at"]
-
-
 class AppliedJobsDB:
 
-    def __init__(self, db_path: str = "applied_jobs.db", csv_path: str = "applied_jobs.csv"):
-        self.db_path  = db_path
-        self.csv_path = csv_path
+    def __init__(self, db_path: str = "applied_jobs.db"):
+        self.db_path = db_path
         self._init_db()
-        self._init_csv()
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
-
-    def _init_csv(self) -> None:
-        if not os.path.exists(self.csv_path):
-            with open(self.csv_path, "w", newline="", encoding="utf-8") as f:
-                csv.DictWriter(f, fieldnames=_CSV_FIELDS).writeheader()
 
     def _init_db(self) -> None:
         conn = self._connect()
@@ -154,28 +143,15 @@ class AppliedJobsDB:
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def mark_applied(self, job, ai_score: int = None) -> str:
-        """Record an application in both SQLite and CSV. Returns the hash."""
+        """Record an application in SQLite. Returns the hash."""
         h          = self._hash(job.job_id, job.company)
         title      = getattr(job, "title",    "")
         company    = getattr(job, "company",  "")
         location   = getattr(job, "location", "")
-        applied_at = datetime.utcnow().isoformat()
+        applied_at = datetime.now(timezone.utc).isoformat()
 
         self._insert_raw(h, job.job_id, title, company, location, ai_score, applied_at)
-        self._append_csv(h, job.job_id, title, company, location, ai_score, applied_at)
         return h
-
-    def _append_csv(self, hash_id, job_id, title, company, location, ai_score, applied_at) -> None:
-        with open(self.csv_path, "a", newline="", encoding="utf-8") as f:
-            csv.DictWriter(f, fieldnames=_CSV_FIELDS).writerow({
-                "hash":       hash_id,
-                "job_id":     job_id,
-                "title":      title,
-                "company":    company,
-                "location":   location,
-                "ai_score":   ai_score if ai_score is not None else "",
-                "applied_at": applied_at,
-            })
 
     def _insert_raw(
         self,

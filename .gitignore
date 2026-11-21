@@ -13,6 +13,7 @@ config.json
 veto.json
 applied_jobs.db
 applied_jobs.csv
+.csv_migrated
 score_cache.json
 qa_cache.json
 nkparams.db

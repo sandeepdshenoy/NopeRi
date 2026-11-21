@@ -157,6 +157,11 @@ class ConfigManager:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
 
+    def reload(self) -> None:
+        """Discard cached config and veto so they are re-read on next access."""
+        self._config = None
+        self._veto   = None
+
     @property
     def config(self) -> dict:
         if self._config is None:

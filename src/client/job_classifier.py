@@ -1,9 +1,12 @@
 import json
+import logging
 import os
 import re
 import requests
 
 from src.utils.config_manager import ConfigManager
+
+logger = logging.getLogger(__name__)
 
 
 class JobFilterPipeline2:
@@ -139,16 +142,10 @@ class JobFilterPipeline2:
         jobs = self.ai_score_batch(jobs)
 
         jobs = self.rank(jobs)
-        print("AFTER RANK:", len(jobs))
+        logger.debug("After rank: %d jobs", len(jobs))
 
         jobs = self.select(jobs)
-        print("FINAL SELECTED:", len(jobs))
-
-        for j in jobs:
-            print(
-                f"  {j.get('ai_score'):>3}  {j.get('title')} @ {j.get('company')}"
-                f"  |  {j.get('ai_reason', '')}"
-            )
+        logger.debug("Final selected: %d jobs", len(jobs))
 
         return jobs
 
@@ -484,7 +481,7 @@ Jobs:
             )
 
             if res.status_code != 200:
-                print("AI HTTP ERROR:", res.status_code, res.text[:200])
+                logger.error("AI HTTP error: %d  %s", res.status_code, res.text[:200])
                 return {}
 
             if provider == "anthropic":
@@ -494,14 +491,14 @@ Jobs:
             content = re.sub(r"```json|```", "", content).strip()
             match   = re.search(r"\{.*\}", content, re.S)
             if not match:
-                print("AI PARSE ERROR — raw:", content[:300])
+                logger.warning("AI parse error — raw response: %s", content[:300])
                 return {}
 
             data = json.loads(match.group(0))
             return data if isinstance(data, dict) else {}
 
         except Exception as e:
-            print("AI call error:", e)
+            logger.error("AI call error: %s", e)
             return {}
 
     # =========================================================
