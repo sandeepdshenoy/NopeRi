@@ -12,9 +12,13 @@ import json
 import os
 from pathlib import Path
 
-CONFIG_PATH = Path("config.json")
-VETO_PATH   = Path("veto.json")
-PROMPT_PATH = Path("user_prompt.md")
+# Anchor to project root regardless of the working directory the script is run from.
+# src/utils/config_manager.py → .parent = src/utils → .parent = src → .parent = project root
+_ROOT = Path(__file__).resolve().parent.parent.parent
+
+CONFIG_PATH = _ROOT / "config.json"
+VETO_PATH   = _ROOT / "veto.json"
+PROMPT_PATH = _ROOT / "user_prompt.md"
 
 
 # ---------------------------------------------------------------------------

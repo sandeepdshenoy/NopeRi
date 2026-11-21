@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import requests
+from datetime import datetime, timezone
 
 from src.utils.config_manager import ConfigManager
 
@@ -80,6 +81,7 @@ class JobFilterPipeline2:
         self.min_apply_score   = min_apply_score   if min_apply_score   is not None else ai_cfg.get("score_threshold",   50)
         self.ai_score_limit    = ai_score_limit    if ai_score_limit    is not None else ai_cfg.get("ai_score_limit",    300)
         self.batch_size        = batch_size        if batch_size        is not None else ai_cfg.get("batch_size",        50)
+        self.cache_ttl_days    = ai_cfg.get("cache_ttl_days", 7)
         self.cache             = self._load_cache()
 
         # Load veto lists from veto.json
@@ -366,12 +368,14 @@ class JobFilterPipeline2:
             scores = self._call_ai(batch)
             for idx, job in enumerate(batch):
                 jid  = str(job.get("job_id") or "")
-                data = self.cache.get(jid) if jid else None
+                cached = self.cache.get(jid) if jid else None
+                data = cached if (cached and self._is_cache_valid(cached)) else None
 
                 if not data:
                     data = scores.get(str(idx), {"score": 0, "reason": "no response"})
                     if not isinstance(data.get("score"), int):
                         data = {"score": 0, "reason": "parse error"}
+                    data["cached_at"] = datetime.now(timezone.utc).isoformat()
                     if jid:
                         self.cache[jid] = data
 
@@ -533,6 +537,17 @@ Jobs:
     # =========================================================
     # CACHE
     # =========================================================
+
+    def _is_cache_valid(self, data: dict) -> bool:
+        """Return True if the cached entry is within the TTL window."""
+        cached_at = data.get("cached_at")
+        if not cached_at:
+            return False  # legacy entry with no timestamp — treat as expired
+        try:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(cached_at)
+            return age.days < self.cache_ttl_days
+        except Exception:
+            return False
 
     def _load_cache(self):
         if os.path.exists(self.cache_file):

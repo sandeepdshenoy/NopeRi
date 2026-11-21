@@ -1,6 +1,6 @@
 import logging
 import os
-import random
+import secrets
 import time
 import functools
 from io import BytesIO
@@ -445,8 +445,8 @@ class NaukriLoginClient:
         res = self._validate_file_request(filename, file_bytes, form_key, file_key)
 
         if not res.ok:
-            print(res.request.headers.get("Content-Type"))
-            print(res.text)
+            logger.debug("File validation failed — Content-Type: %s  body: %s",
+                         res.request.headers.get("Content-Type"), res.text[:200])
             raise NaukriUploadError("File validation failed")
 
         try:
@@ -578,7 +578,7 @@ class NaukriLoginClient:
     
     def generate_file_key(self, length):
         chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        return "".join(random.choice(chars) for _ in range(length))
+        return "".join(secrets.choice(chars) for _ in range(length))
     
 
     def parse_history(self, raw: dict) -> list[ApplicationHistory]:
