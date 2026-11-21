@@ -1146,6 +1146,132 @@ renderEco();
 document.getElementById('s2-back').addEventListener('click', () => goTo(1));
 document.getElementById('s2-next').addEventListener('click', () => goTo(3));
 
+const TECH_ALIASES = {
+  'c#':'C#', '.net':'.NET', 'asp.net':'ASP.NET', 'dotnet':'.NET Core',
+  '.net core':'.NET Core', 'asp.net core':'ASP.NET Core',
+  'node.js':'Node.js', 'nodejs':'Node.js',
+  'python':'Python', 'react':'React', 'react.js':'React',
+  'angular':'Angular', 'vue':'Vue.js', 'vue.js':'Vue.js',
+  'java':'Java', 'golang':'Go', 'typescript':'TypeScript',
+  'django':'Django', 'fastapi':'FastAPI', 'flask':'Flask',
+  'spring boot':'Spring Boot', 'kotlin':'Kotlin',
+  'php':'PHP', 'ruby':'Ruby', 'scala':'Scala',
+  'swift':'Swift', 'rust':'Rust',
+};
+
+// Infrastructure / DB terms are poor primary Naukri search keywords on their own.
+const SKIP_AS_PRIMARY = new Set([
+  'mongodb','postgresql','mysql','redis','sqlite','dynamodb','cassandra',
+  'docker','kubernetes','terraform','ansible',
+  'aws','azure','gcp','cloud',
+  'sql','rest apis','rest','graphql','git','github','ci/cd','jwt',
+  'microservices','kafka','rabbitmq','elasticsearch',
+]);
+
+// Used to detect whether the stack spans both sides, enabling fullstack combo queries.
+const FRONTEND_TECH = new Set([
+  'react','react.js','angular','vue','vue.js','next.js','nextjs',
+  'svelte','typescript','html','css','tailwind','nuxt',
+]);
+const BACKEND_TECH = new Set([
+  'c#','.net','.net core','asp.net','asp.net core','dotnet',
+  'node.js','nodejs','python','java','django','fastapi','flask',
+  'express','nestjs','spring boot','spring','golang','go',
+  'ruby','rails','php','laravel','kotlin','rust','scala','swift',
+]);
+
+// generateQueries — builds Naukri search queries from wizard values at save time.
+// locations: full array from the Locations field (all cities the user entered).
+// Generates per-location queries for every city, plus All India variants, plus
+// cross-ecosystem fullstack combos when both frontend and backend techs are present.
+function generateQueries(techStack, expYears, role, locations) {
+  // Role title by experience bracket
+  let roleTitle;
+  if      (expYears <= 5)  roleTitle = 'Developer';
+  else if (expYears <= 8)  roleTitle = 'Senior Developer';
+  else if (expYears <= 12) roleTitle = 'Lead Developer';
+  else                     roleTitle = 'Technical Lead';
+
+  // Normalise and classify each stack item
+  const items = techStack.map(t => {
+    const key = t.toLowerCase();
+    return {key, norm: TECH_ALIASES[key] || t};
+  });
+
+  // Detect top frontend and backend terms
+  const topBackendItem  = items.find(({key}) => BACKEND_TECH.has(key));
+  const topFrontendItem = items.find(({key}) => FRONTEND_TECH.has(key));
+  const isFullStack     = !!(topBackendItem && topFrontendItem);
+
+  // Build primary list — when both sides are present, lead with backend then
+  // frontend so the most role-relevant tech drives per-location queries.
+  // Fall back to array order for single-ecosystem stacks.
+  const primary = [];
+  if (isFullStack) {
+    primary.push(topBackendItem.norm);
+    primary.push(topFrontendItem.norm);
+    // Add one more non-infra, non-duplicate term from the stack
+    for (const {key, norm} of items) {
+      if (SKIP_AS_PRIMARY.has(key)) continue;
+      if (!primary.includes(norm)) { primary.push(norm); break; }
+    }
+  } else {
+    for (const {key, norm} of items) {
+      if (SKIP_AS_PRIMARY.has(key)) continue;
+      if (!primary.includes(norm)) primary.push(norm);
+      if (primary.length >= 3) break;
+    }
+  }
+
+  const loc0 = locations[0] || '';
+
+  if (!primary.length) {
+    return [
+      {keyword: 'Software Engineer',    location: loc0},
+      {keyword: 'Full Stack Developer', location: loc0},
+    ];
+  }
+
+  const queries = [];
+
+  // ── Per-location queries (all cities the user entered) ───────────────────────
+  // Only use backend (primary[0]) for per-location to avoid flooding slots.
+  // Frontend and combo queries go All India.
+  for (const loc of locations) {
+    if (primary[0]) queries.push({keyword: `${primary[0]} ${roleTitle}`, location: loc});
+  }
+
+  // ── All India: role-specific variant of primary tech ────────────────────────
+  if (primary[0]) {
+    const roleVariant = role === 'backend'  ? `${primary[0]} Backend Developer`
+                      : role === 'frontend' ? `${primary[0]} Frontend Developer`
+                      : role === 'devops'   ? `${primary[0]} DevOps Engineer`
+                      :                       `${primary[0]} Full Stack Developer`;
+    queries.push({keyword: roleVariant, location: ''});
+  }
+
+  // ── Cross-ecosystem full stack: backend + frontend both present ──────────────
+  // e.g. stack has C# (.NET) + React → generates "C# React Full Stack Lead"
+  if (isFullStack) {
+    const be = topBackendItem.norm;
+    const fe = topFrontendItem.norm;
+    queries.push({keyword: `${be} ${fe} Full Stack ${roleTitle}`, location: loc0});
+    queries.push({keyword: `${be} ${fe} Developer`,               location: ''});
+  } else if (primary[0] && primary[1]) {
+    // No frontend/backend split — simple combo of top 2 primary techs
+    queries.push({keyword: `${primary[0]} ${primary[1]} Developer`, location: loc0});
+  }
+
+  // ── All India: lead/principal variant for senior candidates ──────────────────
+  if (expYears > 8 && primary[0])
+    queries.push({keyword: `${primary[0]} Technical Lead`, location: ''});
+
+  // ── All India: third tech ────────────────────────────────────────────────────
+  if (primary[2]) queries.push({keyword: `${primary[2]} ${roleTitle}`, location: ''});
+
+  return queries.slice(0, 8);
+}
+
 // ── Step 3: AI ────────────────────────────────────────────────────────────────
 function reloadModels() {
   const prov = document.querySelector('input[name="provider"]:checked').value;
@@ -1272,15 +1398,6 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   const tgToken  = document.getElementById('tg-token').value.trim();
   const tgChat   = document.getElementById('tg-chat').value.trim();
 
-  const qMap = {
-    backend:   [['Node.js backend developer','{l}'],['Python backend developer','{l}'],['Node.js Developer',''],['Python Developer','']],
-    fullstack: [['Full Stack Developer Node.js','{l}'],['Fullstack Engineer Python','{l}'],['MERN Stack Developer','{l}'],['Node.js Full Stack','']],
-    frontend:  [['React Developer','{l}'],['Frontend Engineer','{l}'],['Next.js Developer','{l}'],['TypeScript Developer','']],
-    devops:    [['DevOps Engineer','{l}'],['Cloud Engineer AWS','{l}'],['Site Reliability Engineer','{l}'],['Platform Engineer','']],
-  };
-  const pLoc = locs[0] || '';
-  const queries = (qMap[role]||qMap.backend).map(([kw,lt]) => ({keyword:kw, location: lt==='{l}' ? pLoc : lt}));
-
   const env_vars = {};
   if (apiKey) env_vars[provider==='openrouter' ? 'OPENROUTER_API_KEY' : 'OPEN_API_KEY'] = apiKey;
   if (tgToken) env_vars['TELEGRAM_BOT_TOKEN'] = tgToken;
@@ -1299,7 +1416,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
       apply_remote:     document.getElementById('apply-remote').checked,
       current_ctc:      document.getElementById('current-ctc').value.trim()||'5',
       expected_ctc:     document.getElementById('expected-ctc').value.trim()||'7',
-      notice_days:      parseInt(document.getElementById('notice-days').value)||30,
+      notice_days:      (v => Number.isFinite(v) ? v : 30)(parseInt(document.getElementById('notice-days').value)),
       resume_path:      document.getElementById('resume-path').value.trim(),
     },
     ai: {
@@ -1307,6 +1424,9 @@ document.getElementById('btn-save').addEventListener('click', async () => {
       model,
       score_threshold:   parseInt(document.getElementById('score-thr').value),
       daily_apply_limit: parseInt(document.getElementById('daily-limit').value)||50,
+    },
+    search: {
+      notice_period: parseInt(document.getElementById('notice-days').value) === 0 ? 0 : null,
     },
     cron: {
       apply: {
@@ -1317,7 +1437,6 @@ document.getElementById('btn-save').addEventListener('click', async () => {
       },
     },
     telegram: { enabled: tgOn },
-    queries,
     session: storedSession,
     env_vars,
     veto: {
@@ -1377,7 +1496,7 @@ fetch(API + '/api/config')
 
     // Pre-fill profile
     if (p.experience_years) document.getElementById('exp-years').value  = p.experience_years;
-    if (p.notice_days)      document.getElementById('notice-days').value = p.notice_days;
+    if (p.notice_days != null) document.getElementById('notice-days').value = p.notice_days;
     if (p.current_ctc)      document.getElementById('current-ctc').value = p.current_ctc;
     if (p.expected_ctc)     document.getElementById('expected-ctc').value = p.expected_ctc;
     if (p.apply_remote !== undefined) document.getElementById('apply-remote').checked = p.apply_remote;

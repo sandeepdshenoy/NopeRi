@@ -535,6 +535,7 @@ class NaukriJobClient:
         experience:       int = 2,
         results_per_page: int = 20,
         lat_long:         str = "",
+        notice_period:    int = None,
     ) -> list[Job]:
 
         url     = JOB_SEARCH_URL
@@ -554,6 +555,9 @@ class NaukriJobClient:
             "src":            "jobsearchDesk",
             "latLong":        lat_long,
         }
+
+        if notice_period is not None:
+            params["noticePeriod"] = notice_period
 
         res = self._session.get(url, headers=self._search_headers(), params=params)
 

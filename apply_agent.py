@@ -371,9 +371,10 @@ recent.forEach(r=>{{
 def _fetch_jobs(jc: NaukriJobClient, config: dict) -> list:
     queries    = config.get("queries", [])
     search_cfg = config.get("search", {})
-    exp        = config.get("profile", {}).get("experience_years", 2)
-    job_age    = search_cfg.get("job_age", 2)
-    pages      = search_cfg.get("pages_per_query", 1)
+    exp           = config.get("profile", {}).get("experience_years", 2)
+    job_age       = search_cfg.get("job_age", 2)
+    pages         = search_cfg.get("pages_per_query", 1)
+    notice_period = search_cfg.get("notice_period", None)
 
     seen, all_jobs = set(), []
     _section(f"fetching jobs  ({len(queries)} queries × {pages} page)")
@@ -381,7 +382,7 @@ def _fetch_jobs(jc: NaukriJobClient, config: dict) -> list:
     for q in queries:
         for page in range(1, pages + 1):
             try:
-                jobs     = jc.search_jobs(q["keyword"], q.get("location",""), page=page, job_age=job_age, experience=exp)
+                jobs     = jc.search_jobs(q["keyword"], q.get("location",""), page=page, job_age=job_age, experience=exp, notice_period=notice_period)
                 new_jobs = [j for j in jobs if j.job_id not in seen and not seen.add(j.job_id)]
                 all_jobs.extend(new_jobs)
                 _print_fetch_row(q["keyword"], q.get("location",""), exp, page, len(jobs), len(new_jobs))

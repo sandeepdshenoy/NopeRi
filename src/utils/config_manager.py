@@ -44,6 +44,7 @@ DEFAULT_CONFIG: dict = {
     "search": {
         "job_age":           2,
         "pages_per_query":   1,
+        "notice_period":     None,   # 0 = immediate joiner, 15/30/45/60/90 days, None = no filter
     },
     "queries": [
         {"keyword": "Node.js backend developer", "location": "Bangalore"},

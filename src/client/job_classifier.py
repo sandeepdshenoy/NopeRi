@@ -44,7 +44,7 @@ class JobFilterPipeline2:
         "android", "ios", "flutter", "mobile", "kotlin", "swift",
         "embedded", "firmware",
         "ml engineer", "data engineer", "data scientist",
-        "intern", "internship", "lead", "golang", "mlops", "devops",
+        "intern", "internship", "golang", "mlops", "devops",
         "web developer - java technologies",
         "member of technical staff - mts",
     }
@@ -244,9 +244,10 @@ class JobFilterPipeline2:
     # =========================================================
 
     def experience_filter(self, jobs):
+        candidate_exp = self.cfg.config.get("profile", {}).get("experience_years", 2)
         return [
             j for j in jobs
-            if j.get("experience_min", 0) <= 4
+            if j.get("experience_min", 0) <= candidate_exp
             and j.get("experience_max", 10) > 0
         ]
 
@@ -435,7 +436,7 @@ SCORING RUBRIC — use the full range, not just 85/60:
   Very little stack overlap, or role is clearly not backend.
 
 0-9 — do not apply
-  Zero stack overlap (Java+Spring only, PHP only, .NET only etc.)
+  Zero stack overlap with the candidate's declared stack
   OR walk-in / venue / intern role.
 
 RULES:
