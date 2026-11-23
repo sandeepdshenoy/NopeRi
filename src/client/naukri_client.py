@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import secrets
@@ -400,7 +401,10 @@ class NaukriLoginClient:
             return self.profile_id
 
         res = self._fetch_dashboard()
-        data = res.json()
+        try:
+            data = res.json()
+        except Exception as exc:
+            raise NaukriParseError(f"Failed to parse dashboard response: {exc}") from exc
 
         pid = data.get("profileId") or data.get("dashBoard", {}).get("profileId")
         if not pid:
@@ -463,27 +467,47 @@ class NaukriLoginClient:
     def _update_resume_request(self, url, headers, payload):
         return self.session.post(url, headers=headers, json=payload)
 
-    def update_resume(self, resume_file):
-        pid = self.fetch_profile_id()
-        url = RESUME_UPDATE_URL_TEMPLATE.format(profile_id=pid)
-        file_key, form_key = self.validate_file(resume_file)
+    def update_resume(self, resume_file, max_attempts: int = 3, retry_delay: float = 5.0):
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                pid = self.fetch_profile_id()
+                url = RESUME_UPDATE_URL_TEMPLATE.format(profile_id=pid)
+                file_key, form_key = self.validate_file(resume_file)
 
-        headers = self._build_headers(
-            auth=True,
-            extra={
-                "accept-encoding": "gzip, deflate, br, zstd",
-                "accept-language": "en-US,en;q=0.9",
-                "content-type": "application/json",
-                "origin": "https://www.naukri.com",
-                "referer": "https://www.naukri.com/mnjuser/profile",
-                "systemid": "105",
-                "x-http-method-override": "PUT",
-            },
-        )
+                headers = self._build_headers(
+                    auth=True,
+                    extra={
+                        "accept-encoding": "gzip, deflate, br, zstd",
+                        "accept-language": "en-US,en;q=0.9",
+                        "content-type": "application/json",
+                        "origin": "https://www.naukri.com",
+                        "referer": "https://www.naukri.com/mnjuser/profile",
+                        "systemid": "105",
+                        "x-http-method-override": "PUT",
+                    },
+                )
 
-        payload = {"textCV": {"formKey": form_key, "fileKey": file_key}}
-        res = self._update_resume_request(url, headers, payload)
-        return ResumeUpdateResult(pid, res.json(), res.status_code)
+                payload = {"textCV": {"formKey": form_key, "fileKey": file_key}}
+                res = self._update_resume_request(url, headers, payload)
+
+                if not res.text.strip():
+                    raise NaukriUploadError("Empty response body from resume upload endpoint")
+
+                return ResumeUpdateResult(pid, res.json(), res.status_code)
+
+            except (json.JSONDecodeError, NaukriUploadError, NaukriParseError) as exc:
+                last_exc = exc
+                logger.warning(
+                    "[update_resume] attempt %d/%d failed (%s), retrying in %.0fs ...",
+                    attempt, max_attempts, exc, retry_delay,
+                )
+                if attempt < max_attempts:
+                    time.sleep(retry_delay)
+
+        raise NaukriUploadError(
+            f"Resume upload failed after {max_attempts} attempts: {last_exc}"
+        ) from last_exc
 
     # ------------------------------------------------------------------
     # Profile update

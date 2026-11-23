@@ -390,7 +390,7 @@ def _fetch_jobs(jc: NaukriJobClient, config: dict) -> list:
                     break
                 time.sleep(1.2)
             except Exception as e:
-                print(f"  {Fore.RED}[FAIL]{Style.RESET_ALL}  {q['keyword']} @ {q.get('location','')}  →  {e}")
+                print(f"  {Fore.RED}[FAIL]{Style.RESET_ALL}  {q['keyword']} @ {q.get('location','')}  ->  {e}")
                 time.sleep(3)
 
     print(f"\n  {Fore.CYAN}Total unique jobs: {Style.BRIGHT}{len(all_jobs)}{Style.RESET_ALL}")
@@ -419,22 +419,49 @@ def run_agent(cfg: ConfigManager, db: AppliedJobsDB) -> dict:
 
     # ── Login ─────────────────────────────────────────────────────────────────
     _section("logging in to naukri")
-    session = config.get("session", {})
-    nauk_at = session.get("nauk_at", "")
+    session  = config.get("session", {})
+    nauk_at  = session.get("nauk_at", "")
+    username = os.getenv("NAUKRI_USERNAME", "")
+    password = os.getenv("PASSWORD", "")
 
-    if nauk_at:
-        client = NaukriLoginClient.from_browser_cookies(nauk_at, session.get("nauk_rt",""))
-        print(f"  {Fore.GREEN}Resumed session from stored cookies{Style.RESET_ALL}")
-    else:
-        username = os.getenv("NAUKRI_USERNAME", "")
-        password = os.getenv("PASSWORD", "")
+    def _jwt_expired(token: str) -> bool:
+        try:
+            import base64 as _b64, json as _json
+            payload = token.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            return _json.loads(_b64.b64decode(payload)).get("exp", 0) < time.time()
+        except Exception:
+            return False
+
+    def _fresh_login() -> NaukriLoginClient:
         if not username or not password:
-            print(f"  {Fore.RED}No credentials found.{Style.RESET_ALL}")
-            print(f"  Add NAUKRI_USERNAME and PASSWORD to .env, or run --setup.")
-            sys.exit(1)
-        client = NaukriLoginClient(username, password)
-        client.login()
+            raise RuntimeError("Cannot re-login: no credentials in .env")
+        _client = NaukriLoginClient(username, password)
+        _client.login()
+        new_at = _client.session.cookies.get("nauk_at", "")
+        new_rt = _client.session.cookies.get("nauk_rt", "") or ""
+        if new_at:
+            data = cfg.config
+            data["session"] = {"nauk_at": new_at, "nauk_rt": new_rt}
+            cfg.save(data)
+        return _client
+
+    if nauk_at and not _jwt_expired(nauk_at):
+        client = NaukriLoginClient.from_browser_cookies(nauk_at, session.get("nauk_rt", ""))
+        print(f"  {Fore.GREEN}Resumed session from stored cookies{Style.RESET_ALL}")
+    elif username and password:
+        if nauk_at:
+            print(f"  {Fore.YELLOW}Stored session expired — re-authenticating...{Style.RESET_ALL}")
+        client = _fresh_login()
         print(f"  {Fore.GREEN}Logged in as {Fore.YELLOW}{username}{Style.RESET_ALL}")
+    elif nauk_at:
+        # Expired token, no credentials — try it anyway
+        client = NaukriLoginClient.from_browser_cookies(nauk_at, session.get("nauk_rt", ""))
+        print(f"  {Fore.YELLOW}Session may be expired and no .env credentials found — attempting anyway{Style.RESET_ALL}")
+    else:
+        print(f"  {Fore.RED}No credentials found.{Style.RESET_ALL}")
+        print(f"  Add NAUKRI_USERNAME and PASSWORD to .env, or run --setup.")
+        sys.exit(1)
 
     if tg_on and alerts.get("on_scheduler_start", True):
         alert_run_started("manual")
@@ -597,6 +624,27 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.setup or not CONFIG_PATH.exists():
+        if args.setup and CONFIG_PATH.exists():
+            config_data = cfg.config
+            config_data["session"] = {}
+            cfg.save(config_data)
+            username = os.getenv("NAUKRI_USERNAME", "")
+            password = os.getenv("PASSWORD", "")
+            if username and password:
+                print(f"  Re-authenticating with Naukri to refresh session token...")
+                try:
+                    _client = NaukriLoginClient(username, password)
+                    _client.login()
+                    nauk_at = _client.session.cookies.get("nauk_at", "")
+                    nauk_rt = _client.session.cookies.get("nauk_rt", "") or ""
+                    if nauk_at:
+                        config_data["session"] = {"nauk_at": nauk_at, "nauk_rt": nauk_rt}
+                        cfg.save(config_data)
+                        print(f"  {Fore.GREEN}Session refreshed successfully.{Style.RESET_ALL}")
+                    else:
+                        print(f"  {Fore.YELLOW}Login succeeded but no token received — use the wizard to paste cookies manually.{Style.RESET_ALL}")
+                except Exception as e:
+                    print(f"  {Fore.YELLOW}Auto-login failed ({e}) — use the wizard to paste cookies manually.{Style.RESET_ALL}")
         from src.utils.web_setup import launch as web_launch
         web_launch()
         cfg.reload()  # reload after wizard wrote config.json
@@ -619,7 +667,7 @@ if __name__ == "__main__":
         except Exception:
             pass
         if count:
-            print(f"  {Fore.CYAN}Migrated {count} record(s) from CSV → SQLite{Style.RESET_ALL}")
+            print(f"  {Fore.CYAN}Migrated {count} record(s) from CSV -> SQLite{Style.RESET_ALL}")
         # Write flag so this block is skipped on all future runs.
         try:
             with open(_MIGRATION_FLAG, "w"):
