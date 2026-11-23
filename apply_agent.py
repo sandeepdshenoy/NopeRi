@@ -371,7 +371,7 @@ recent.forEach(r=>{{
 def _fetch_jobs(jc: NaukriJobClient, config: dict) -> list:
     queries    = config.get("queries", [])
     search_cfg = config.get("search", {})
-    exp           = config.get("profile", {}).get("experience_years", 2)
+    exp           = search_cfg["experience"] if "experience" in search_cfg else config.get("profile", {}).get("experience_years", 2)
     job_age       = search_cfg.get("job_age", 2)
     pages         = search_cfg.get("pages_per_query", 1)
     notice_period = search_cfg.get("notice_period", None)
@@ -487,19 +487,21 @@ def run_agent(cfg: ConfigManager, db: AppliedJobsDB) -> dict:
         print(f"\n{Fore.YELLOW}  No jobs found.{Style.RESET_ALL}")
         return {"total":0,"applied":0,"skipped_ext":0,"skipped_dup":0,"failed":0}
 
-    # ── AI filter ─────────────────────────────────────────────────────────────
+    # ── Filter pipeline ───────────────────────────────────────────────────────
+    pipeline = JobFilterPipeline2(config_manager=cfg)
+
     if cfg.get_ai_key():
         _section("running AI filter pipeline")
-        pipeline   = JobFilterPipeline2(config_manager=cfg)
         final_jobs = pipeline.run(jobs)
-        score_map  = {j["job_id"]: j for j in final_jobs}
+        score_map  = {str(j["job_id"]): j for j in final_jobs}
         allow      = set(score_map)
         _print_pipeline_table(final_jobs)
     else:
-        _section("AI filter skipped — no API key set")
+        _section("AI filter skipped — running pre-filters only")
         print(f"  {Fore.YELLOW}Set OPENROUTER_API_KEY or OPEN_API_KEY in .env to enable scoring.{Style.RESET_ALL}")
-        score_map = {}
-        allow     = {j.job_id for j in jobs}
+        final_jobs = pipeline.run_pre_filters(jobs)
+        score_map  = {}
+        allow      = {str(j["job_id"]) for j in final_jobs}
 
     # ── Questionnaire AI ──────────────────────────────────────────────────────
     _qa = None
@@ -511,7 +513,7 @@ def run_agent(cfg: ConfigManager, db: AppliedJobsDB) -> dict:
             print(f"  {Fore.YELLOW}Questionnaire AI unavailable: {e}{Style.RESET_ALL}")
 
     # ── Apply loop ─────────────────────────────────────────────────────────────
-    allowed    = [j for j in jobs if j.job_id in allow]
+    allowed    = [j for j in jobs if str(j.job_id) in allow]
     applied    = 0
     skip_ext   = 0
     skip_dup   = 0

@@ -89,6 +89,7 @@ class JobFilterPipeline2:
         self.VETO_TITLES    = [t.lower() for t in veto.get("titles",    [])]
         self.VETO_COMPANIES = {c.lower() for c in veto.get("companies", [])}
         self.VETO_STACKS    = {s.lower() for s in veto.get("stack_veto", [])}
+        self.VETO_TAGS      = {t.lower() for t in veto.get("tag_veto",  [])}
 
         # Candidate's stack from config (drives tag_presort overlap score)
         raw_stack = self.cfg.config.get("profile", {}).get("tech_stack", [])
@@ -119,24 +120,28 @@ class JobFilterPipeline2:
         jobs = self.normalize_jobs(jobs)
 
         n = len(jobs); jobs = self.dedup(jobs);               d_dedup   = n - len(jobs)
+        n = len(jobs); jobs = self.tag_hard_veto(jobs);      d_tagveto = n - len(jobs)
         n = len(jobs); jobs = self.hard_veto(jobs);           d_veto    = n - len(jobs)
         n = len(jobs); jobs = self.experience_filter(jobs);   d_exp     = n - len(jobs)
         n = len(jobs); jobs = self.desc_red_flag_check(jobs); d_flags   = n - len(jobs)
         n = len(jobs); jobs = self.title_filter(jobs);        d_title   = n - len(jobs)
         n = len(jobs); jobs = self.company_veto(jobs);        d_company = n - len(jobs)
-        n = len(jobs); jobs = self.stack_veto_filter(jobs);   d_stack   = n - len(jobs)
+        n = len(jobs); jobs = self.stack_veto_filter(jobs);    d_stack   = n - len(jobs)
+        n = len(jobs); jobs = self.stack_overlap_filter(jobs); d_overlap = n - len(jobs)
 
         jobs = self.tag_presort(jobs)
         jobs = jobs[:self.ai_score_limit]
 
         dropped = [
             (d_dedup,   "dedup"),
+            (d_tagveto, "tag-veto"),
             (d_veto,    "veto"),
             (d_exp,     "exp"),
             (d_flags,   "flags"),
             (d_title,   "title"),
             (d_company, "company"),
             (d_stack,   "stack"),
+            (d_overlap, "no-overlap"),
         ]
         breakdown = "  ".join(f"-{d} {lbl}" for d, lbl in dropped if d > 0) or "none filtered"
         print(f"  {raw} fetched  →  {len(jobs)} to score   ({breakdown})")
@@ -149,6 +154,24 @@ class JobFilterPipeline2:
         jobs = self.select(jobs)
         logger.debug("Final selected: %d jobs", len(jobs))
 
+        return jobs
+
+    def run_pre_filters(self, jobs) -> list[dict]:
+        """Run all pipeline stages except AI scoring. Used when no API key is set."""
+        jobs = self.normalize_jobs(jobs)
+        jobs = self.dedup(jobs)
+        jobs = self.tag_hard_veto(jobs)
+        jobs = self.hard_veto(jobs)
+        jobs = self.experience_filter(jobs)
+        jobs = self.desc_red_flag_check(jobs)
+        jobs = self.title_filter(jobs)
+        jobs = self.company_veto(jobs)
+        jobs = self.stack_veto_filter(jobs)
+        jobs = self.stack_overlap_filter(jobs)
+        jobs = self.tag_presort(jobs)
+
+        n = len(jobs)
+        print(f"  {n} jobs passed pre-filters (AI scoring disabled — all will be applied)")
         return jobs
 
     # =========================================================
@@ -224,6 +247,25 @@ class JobFilterPipeline2:
             seen.add(job_id)
             result.append(j)
         return result
+
+    # =========================================================
+    # TAG HARD VETO — veto.json tag_veto list
+    #
+    # Drops a job immediately if ANY of its tags exactly matches
+    # an entry in tag_veto. Runs before all other filters.
+    # Exact match prevents "java" from catching "javascript".
+    # =========================================================
+
+    def tag_hard_veto(self, jobs):
+        if not self.VETO_TAGS:
+            return jobs
+        clean = []
+        for j in jobs:
+            tags = {t.lower() for t in (j.get("tags") or [])}
+            if tags & self.VETO_TAGS:
+                continue
+            clean.append(j)
+        return clean
 
     # =========================================================
     # HARD VETO — title only, veto.json-driven
@@ -338,6 +380,33 @@ class JobFilterPipeline2:
                 continue
 
             clean.append(j)
+
+        return clean
+
+    # =========================================================
+    # STACK OVERLAP FILTER
+    #
+    # Drops jobs where none of the job's tags match the candidate's
+    # stack. Jobs with no tags at all are passed through — the AI
+    # will judge them on title/description alone.
+    # =========================================================
+
+    def stack_overlap_filter(self, jobs):
+        my_stack = set(self.MY_STACK)
+        clean    = []
+
+        for j in jobs:
+            tags = j.get("tags") or []
+            if not tags:
+                clean.append(j)
+                continue
+
+            has_overlap = any(
+                t in my_stack or any(s in t for s in my_stack if len(s) > 4)
+                for t in tags
+            )
+            if has_overlap:
+                clean.append(j)
 
         return clean
 
